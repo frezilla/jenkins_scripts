@@ -1,0 +1,85 @@
+pipeline {
+  agent any
+  parameters {
+      choice choices: ['Master', 'Development', 'Feature', 'Release'], description: 'Environnement cible', name: 'ENVIRONMENT'
+  }
+  environment {
+    DUMP_ARCHIVE_PATH="/tmp/dump.sql.gz"
+    DUMP_SRC_PATH="/tmp/dump.sql"
+  }
+  stages {
+    stage ('Copie du dump') {
+      steps {
+        script {
+          def src_dir = "/media/partage_mistral/Archives ALIZE/MISTRALBD/QUOTIDIEN"
+          println("Sélection du dernier dump depuis le répertoire : <${src_dir}>")
+          
+          def src_file = sh (script: "ls '${src_dir}' -1tr | grep gz\$ | tail -1", returnStdout: true).trim() as String
+          def src_path = src_dir + '/' + src_file
+          println("-> ${src_path}")
+          
+          println("Copie du fichier")
+          sh (script: "cp -f '${src_path}' ${DUMP_ARCHIVE_PATH}", returnStdout: false)
+        }
+      }
+    }
+    stage ('Extraction du dump') {
+      steps {
+        script {
+          println("Extraction de l'archive")
+          sh (script: "gzip -dfq ${DUMP_ARCHIVE_PATH}", returnStdout: false)
+        }
+      }
+    }
+    stage ('Traitement du script d\'import') {
+      steps {
+        script {
+          println("Mise en forme du fichier source")
+          sh (script: "sed 's/\\sDEFINER=`[^`]*`@`[^`]*`//g' -i ${DUMP_SRC_PATH}", returnStdout: false)
+        }
+      }
+    }
+    stage ('Import des données en base') {
+      steps {
+        withCredentials([usernamePassword(credentialsId: 'jenkins-user-for-mysql', passwordVariable: 'DATABASE_PASSWORD', usernameVariable: 'DATABASE_USERNAME')]) {
+          script {
+            def target_host
+            
+            if (ENVIRONMENT=="Master") {
+              target_host="mysql_master"
+            } else if (ENVIRONMENT=="Development") {
+              target_host="mysql_develop"
+            } else if (ENVIRONMENT=="Feature") {
+              target_host="mysql_feature"
+            } else if (ENVIRONMENT=="Release") {
+              target_host="mysql_release"
+            }
+            
+            println("Cible ${target_host}")
+
+            sh (script: '''mysql --host=''' + target_host + ''' --user=${DATABASE_USERNAME} --password=${DATABASE_PASSWORD} <<-EOF 
+                DROP DATABASE IF EXISTS alize; 
+                CREATE DATABASE IF NOT EXISTS alize;
+                USE alize;
+                source ${DUMP_SRC_PATH};
+                DELETE FROM ftppartnership;
+                UPDATE house SET divaltodirectory ='', divaltobackdirectory = '',  accountingfolder = '', accountingmail = '';
+                exit
+EOF''', 
+                returnStdout: false)
+          }
+          
+        }
+      }
+    }
+  }
+  post {
+    always {
+      println("Suppression de l'archive")
+      sh (script: "rm -f ${DUMP_ARCHIVE_PATH}", returnStdout: false)    
+      
+      println("Suppression du script")
+      sh (script: "rm -f ${DUMP_SRC_PATH}", returnStdout: false)
+    }
+  }
+}
