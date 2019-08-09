@@ -2,10 +2,14 @@ pipeline {
   agent any
   parameters {
       choice choices: ['Master', 'Development', 'Feature', 'Release'], description: 'Environnement cible', name: 'ENVIRONMENT'
+      booleanParam(name: 'IMPORT_COMMERCIALS_TABLES', defaultValue: true, description: 'Importer les tables commerciales recalculées par le batch de cumul')
+      booleanParam(name: 'IMPORT_COMMERCIALS_INFO', defaultValue: true, description: 'Importer les informations commerciales')
+      booleanParam(name: 'IMPORT_USER_ACTION_LOGGING', defaultValue: false, description: 'Importer les données de la table de log des actions utilisateurs')
   }
   environment {
     DUMP_ARCHIVE_PATH="/tmp/dump.sql.gz"
     DUMP_SRC_PATH="/tmp/dump.sql"
+    DUMP_WORK_PATH="/tmp/dump.working.sql"
   }
   stages {
     stage ('Copie du dump') {
@@ -36,6 +40,24 @@ pipeline {
         script {
           println("Mise en forme du fichier source")
           sh (script: "sed 's/\\sDEFINER=`[^`]*`@`[^`]*`//g' -i ${DUMP_SRC_PATH}", returnStdout: false)
+          
+          if (params.IMPORT_USER_ACTION_LOGGING==false) {
+            println("Suppression des traces utilisateurs")
+            sh (script: "grep  -v -i 'INSERT INTO `user_action_logging`' ${DUMP_SRC_PATH} > ${DUMP_WORK_PATH}", returnStdout: false) 
+            sh (script: "cp -f ${DUMP_WORK_PATH} ${DUMP_SRC_PATH}", returnStdout: false)
+          }
+          
+          if (params.IMPORT_COMMERCIALS_INFO==false) {
+            println("Suppression des informations commerciales")
+            sh (script: "egrep  -v -i -e 'INSERT INTO `invoice[[:digit:]]{4}`' -e 'INSERT INTO `deliveryorder`' ${DUMP_SRC_PATH} > ${DUMP_WORK_PATH}", returnStdout: false)
+            sh (script: "cp -f ${DUMP_WORK_PATH} ${DUMP_SRC_PATH}", returnStdout: false)
+          }          
+          
+          if (params.IMPORT_COMMERCIALS_TABLES==false) {
+            println("Suppression des données commerciales")
+            sh (script: "egrep  -v -i -e 'INSERT INTO `invoice[[:digit:]]{4}collectionclient`' -e 'INSERT INTO `invoice[[:digit:]]{4}groupclient`' -e 'INSERT INTO `invoice[[:digit:]]{4}houseclient`' -e 'INSERT INTO `invoice[[:digit:]]{4}shelvingclient`' -e 'INSERT INTO `invoice[[:digit:]]{4}collection`' -e 'INSERT INTO `invoice[[:digit:]]{4}salepoint`' -e 'INSERT INTO `invoice[[:digit:]]{4}salepointarticle`' -e 'INSERT INTO `invoice[[:digit:]]{4}centralarticle`' -e 'INSERT INTO `invoice[[:digit:]]{4}signarticle`' -e 'INSERT INTO `invoice[[:digit:]]{4}signtypearticle`' -e 'INSERT INTO `invoice[[:digit:]]{4}countryarticle`' -e 'INSERT INTO `invoice[[:digit:]]{4}countryclient`' -e 'INSERT INTO `invoice[[:digit:]]{4}clientarticle`' -e 'INSERT INTO `invoice[[:digit:]]{4}clientgroupingarticle`' -e 'INSERT INTO `deliveryordercollectionclient`' -e 'INSERT INTO `deliveryordergroupclient`' -e 'INSERT INTO `deliveryorderhouseclient`' -e 'INSERT INTO `deliveryordershelvingclient`' -e 'INSERT INTO `deliveryordercollection`' -e 'INSERT INTO `deliveryordersalepoint`' -e 'INSERT INTO `deliveryordersalepointarticle`' -e 'INSERT INTO `deliveryordercentralarticle`' -e 'INSERT INTO `deliveryordersignarticle`' -e 'INSERT INTO `deliveryordersigntypearticle`' -e 'INSERT INTO `deliveryordercountryarticle`' -e 'INSERT INTO `deliveryordercountryclient`' -e 'INSERT INTO `deliveryorderclientarticle`' -e 'INSERT INTO `deliveryorderclientgroupingarticle`' -e 'INSERT INTO `invoice[[:digit:]]clientcumulation`' -e 'INSERT INTO `invoice[[:digit:]]clientclassifcumulation`' ${DUMP_SRC_PATH} > ${DUMP_WORK_PATH}", returnStdout: false)
+            sh (script: "cp -f ${DUMP_WORK_PATH} ${DUMP_SRC_PATH}", returnStdout: false)
+          }
         }
       }
     }
@@ -55,8 +77,6 @@ pipeline {
               target_host="mysql_release"
             }
             
-            println("Cible ${target_host}")
-
             sh (script: '''mysql --host=''' + target_host + ''' --user=${DATABASE_USERNAME} --password=${DATABASE_PASSWORD} <<-EOF 
                 DROP DATABASE IF EXISTS alize; 
                 CREATE DATABASE IF NOT EXISTS alize;
@@ -80,6 +100,9 @@ EOF''',
       
       println("Suppression du script")
       sh (script: "rm -f ${DUMP_SRC_PATH}", returnStdout: false)
+      
+      println("Suppression du script de travail")
+      sh (script: "rm -f ${DUMP_WORK_PATH}", returnStdout: false)
     }
   }
 }
