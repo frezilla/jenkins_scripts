@@ -1,108 +1,151 @@
 pipeline {
-  agent any
-  parameters {
-      choice choices: ['Master', 'Development', 'Feature', 'Release'], description: 'Environnement cible', name: 'ENVIRONMENT'
-      booleanParam(name: 'IMPORT_COMMERCIALS_TABLES', defaultValue: true, description: 'Importer les tables commerciales recalculées par le batch de cumul')
-      booleanParam(name: 'IMPORT_COMMERCIALS_INFO', defaultValue: true, description: 'Importer les informations commerciales')
-      booleanParam(name: 'IMPORT_USER_ACTION_LOGGING', defaultValue: false, description: 'Importer les données de la table de log des actions utilisateurs')
-  }
-  environment {
-    DUMP_ARCHIVE_PATH="/tmp/dump.sql.gz"
-    DUMP_SRC_PATH="/tmp/dump.sql"
-    DUMP_WORK_PATH="/tmp/dump.working.sql"
-  }
-  stages {
-    stage ('Copie du dump') {
-      steps {
-        script {
-          def src_dir = "/media/partage_mistral/Archives ALIZE/MISTRALBD/QUOTIDIEN"
-          println("Sélection du dernier dump depuis le répertoire : <${src_dir}>")
-          
-          def src_file = sh (script: "ls '${src_dir}' -1tr | grep gz\$ | tail -1", returnStdout: true).trim() as String
-          def src_path = src_dir + '/' + src_file
-          println("-> ${src_path}")
-          
-          println("Copie du fichier")
-          sh (script: "cp -f '${src_path}' ${DUMP_ARCHIVE_PATH}", returnStdout: false)
-        }
-      }
+    agent any 
+    environment {
+        MOUNT_URL       = "//192.168.0.10/Partage MISTRAL"
+        MOUNT_DIRECTORY = "/media/partage_mistral"
+        MOUNT_USER      = "mistral"
+        MOUNT_PASSWD    = "Edas5782"
+        WORKING_DUMP    = "/tmp/mistral_dump.sql.gz"
+        SQL_SCRIPT      = "/tmp/mistral_dump.sql"
+        DUMP_DIR        = "/media/partage_mistral/Archives ALIZE/MISTRALBD/QUOTIDIEN"
     }
-    stage ('Extraction du dump') {
-      steps {
-        script {
-          println("Extraction de l'archive")
-          sh (script: "gzip -dfq ${DUMP_ARCHIVE_PATH}", returnStdout: false)
-        }
-      }
+    parameters {
+        choice(choices: ['master', 'development', 'feature'], description: 'Nom de la base de données cible', name: 'databaseName')
+        booleanParam(defaultValue: true, description: 'Utilise le dump local si il a été conservé par le build précédent', name: 'useLocalDumpIfExist')
+        booleanParam(defaultValue: true, description: 'Conserve le dump utilisé par le build courant afin qu\'il soit réutilisé', name: 'keepLocalDump')
+        booleanParam(defaultValue: false, description: 'Importer les tables commerciales recalculées par le batch de cumul', name: 'importCommercialTables')
+        booleanParam(defaultValue: false, description: 'Importer les informations commerciales', name: 'importCommercialDatas')
+        booleanParam(defaultValue: false, description: 'Importer les logs utilisateurs', name: 'importLogs')
     }
-    stage ('Traitement du script d\'import') {
-      steps {
-        script {
-          println("Mise en forme du fichier source")
-          sh (script: "sed 's/\\sDEFINER=`[^`]*`@`[^`]*`//g' -i ${DUMP_SRC_PATH}", returnStdout: false)
-          
-          if (params.IMPORT_USER_ACTION_LOGGING==false) {
-            println("Suppression des traces utilisateurs")
-            sh (script: "grep  -v -i 'INSERT INTO `user_action_logging`' ${DUMP_SRC_PATH} > ${DUMP_WORK_PATH}", returnStdout: false) 
-            sh (script: "cp -f ${DUMP_WORK_PATH} ${DUMP_SRC_PATH}", returnStdout: false)
-          }
-          
-          if (params.IMPORT_COMMERCIALS_INFO==false) {
-            println("Suppression des informations commerciales")
-            sh (script: "egrep  -v -i -e 'INSERT INTO `invoice[[:digit:]]{4}`' -e 'INSERT INTO `deliveryorder`' ${DUMP_SRC_PATH} > ${DUMP_WORK_PATH}", returnStdout: false)
-            sh (script: "cp -f ${DUMP_WORK_PATH} ${DUMP_SRC_PATH}", returnStdout: false)
-          }          
-          
-          if (params.IMPORT_COMMERCIALS_TABLES==false) {
-            println("Suppression des données commerciales")
-            sh (script: "egrep  -v -i -e 'INSERT INTO `invoice[[:digit:]]{4}collectionclient`' -e 'INSERT INTO `invoice[[:digit:]]{4}groupclient`' -e 'INSERT INTO `invoice[[:digit:]]{4}houseclient`' -e 'INSERT INTO `invoice[[:digit:]]{4}shelvingclient`' -e 'INSERT INTO `invoice[[:digit:]]{4}collection`' -e 'INSERT INTO `invoice[[:digit:]]{4}salepoint`' -e 'INSERT INTO `invoice[[:digit:]]{4}salepointarticle`' -e 'INSERT INTO `invoice[[:digit:]]{4}centralarticle`' -e 'INSERT INTO `invoice[[:digit:]]{4}signarticle`' -e 'INSERT INTO `invoice[[:digit:]]{4}signtypearticle`' -e 'INSERT INTO `invoice[[:digit:]]{4}countryarticle`' -e 'INSERT INTO `invoice[[:digit:]]{4}countryclient`' -e 'INSERT INTO `invoice[[:digit:]]{4}clientarticle`' -e 'INSERT INTO `invoice[[:digit:]]{4}clientgroupingarticle`' -e 'INSERT INTO `deliveryordercollectionclient`' -e 'INSERT INTO `deliveryordergroupclient`' -e 'INSERT INTO `deliveryorderhouseclient`' -e 'INSERT INTO `deliveryordershelvingclient`' -e 'INSERT INTO `deliveryordercollection`' -e 'INSERT INTO `deliveryordersalepoint`' -e 'INSERT INTO `deliveryordersalepointarticle`' -e 'INSERT INTO `deliveryordercentralarticle`' -e 'INSERT INTO `deliveryordersignarticle`' -e 'INSERT INTO `deliveryordersigntypearticle`' -e 'INSERT INTO `deliveryordercountryarticle`' -e 'INSERT INTO `deliveryordercountryclient`' -e 'INSERT INTO `deliveryorderclientarticle`' -e 'INSERT INTO `deliveryorderclientgroupingarticle`' -e 'INSERT INTO `invoice[[:digit:]]clientcumulation`' -e 'INSERT INTO `invoice[[:digit:]]clientclassifcumulation`' ${DUMP_SRC_PATH} > ${DUMP_WORK_PATH}", returnStdout: false)
-            sh (script: "cp -f ${DUMP_WORK_PATH} ${DUMP_SRC_PATH}", returnStdout: false)
-          }
-        }
-      }
-    }
-    stage ('Import des données en base') {
-      steps {
-        withCredentials([usernamePassword(credentialsId: 'jenkins-user-for-mysql', passwordVariable: 'DATABASE_PASSWORD', usernameVariable: 'DATABASE_USERNAME')]) {
-          script {
-            def target_host
-            
-            if (ENVIRONMENT=="Master") {
-              target_host="mysql_master"
-            } else if (ENVIRONMENT=="Development") {
-              target_host="mysql_develop"
-            } else if (ENVIRONMENT=="Feature") {
-              target_host="mysql_feature"
-            } else if (ENVIRONMENT=="Release") {
-              target_host="mysql_release"
+    stages {
+        stage('Sélection du fichier à traiter') {
+            steps {
+                script {
+                    def importFromLan
+                    
+                    if (params.useLocalDumpIfExist==true) {
+                        echo 'Recherche du dump existant'
+                        
+                        localDumpExist = 
+                            sh(returnStdout: true, label: 'Recherche du dump local', script: '''
+                                if [ $(ls ${WORKING_DUMP} | grep -c ${WORKING_DUMP}) != 1 ]
+                                then
+                                    echo 0
+                                else
+                                    echo 1
+                                fi
+                            ''').trim()
+                        
+                        if (localDumpExist=="0") {
+                            echo 'Le fichier n\'existe pas'
+                            importFromLan = true
+                        } else {
+                            echo 'Utilisation du fichier local'
+                            importFromLan = false
+                        }
+                    } else {
+                        importFromLan = true
+                    }    
+                        
+                    if (importFromLan==true) {
+                        echo 'Connexion au lecteur réseau'
+                        
+                        isMediaMounted = 
+                            sh(returnStdout: true, label: 'Vérification de l\'état du lecteur', script: '''
+                                if [ $( mount | grep -c ${MOUNT_DIRECTORY}) != 1 ]
+                                then
+                                    echo 0
+                                else
+                                    echo 1
+                                fi
+                            ''').trim()
+
+                        if (isMediaMounted=="0") {
+                            sh(returnStdout: false, label: 'Tentative de connexion au lecteur réseau', script: "sudo mount -t cifs '${MOUNT_URL}' ${MOUNT_DIRECTORY} -o username=${MOUNT_USER},password=${MOUNT_PASSWD}")
+                        } else {
+                            echo "Lecteur réseau déjà connecté"
+                        }
+
+                        echo 'Recherche du dump le plus récent'
+                        srcDumpFile = sh(returnStdout: true, label: 'Recherche du dump le plus récent', script: "ls '${DUMP_DIR}' -1tr | grep gz\$ | tail -1").trim() as String
+                        srcDumpFile = DUMP_DIR + '/' + srcDumpFile
+
+                        sh(returnStdout: false, label: 'Copie du fichier', script: "cp -f '${srcDumpFile}' ${WORKING_DUMP}")
+
+                        sh(returnStdout: false, label: 'Fermeture de la connexion au lecteur réseau', script: "sudo umount ${MOUNT_DIRECTORY}")
+                    }
+                }
             }
-            
-            sh (script: '''mysql --host=''' + target_host + ''' --user=${DATABASE_USERNAME} --password=${DATABASE_PASSWORD} <<-EOF 
-                DROP DATABASE IF EXISTS alize; 
-                CREATE DATABASE IF NOT EXISTS alize;
-                USE alize;
-                source ${DUMP_SRC_PATH};
-                DELETE FROM ftppartnership;
-                UPDATE house SET divaltodirectory ='', divaltobackdirectory = '',  accountingfolder = '', accountingmail = '';
-                exit
-EOF''', 
-                returnStdout: false)
-          }
-          
         }
-      }
+        stage('Traitement des données') {
+            steps {
+                script {
+                    sh(returnStdout: false, label: 'Extraction de l\'archive', script: "gzip -dfqk ${WORKING_DUMP}")
+                    
+                    sh(returnStdout: false, label: 'Mise en forme du fichier source', script: "sed 's/\\sDEFINER=`[^`]*`@`[^`]*`//g' -i ${SQL_SCRIPT}")
+                    
+                    def deleteInfo = false
+                    def deleteOrder
+                    
+                    if (params.importLogs==false) {
+                        deleteInfo = true;
+                        deleteOrder = "-e 'INSERT INTO `user_action_logging`' "
+                    }
+                    if (params.importCommercialDatas==false) {
+                        deleteInfo = true;
+                        deleteOrder = deleteOrder + "-e 'INSERT INTO `invoice[[:digit:]]{4}`' -e 'INSERT INTO `deliveryorder`' "
+                    }
+                    if (params.importCommercialTables==false) {
+                        deleteInfo = true;
+                        deleteOrder = deleteOrder + "-e 'INSERT INTO `invoice[[:digit:]]{4}collectionclient`' -e 'INSERT INTO `invoice[[:digit:]]{4}groupclient`' -e 'INSERT INTO `invoice[[:digit:]]{4}houseclient`' -e 'INSERT INTO `invoice[[:digit:]]{4}shelvingclient`' -e 'INSERT INTO `invoice[[:digit:]]{4}collection`' -e 'INSERT INTO `invoice[[:digit:]]{4}salepoint`' -e 'INSERT INTO `invoice[[:digit:]]{4}salepointarticle`' -e 'INSERT INTO `invoice[[:digit:]]{4}centralarticle`' -e 'INSERT INTO `invoice[[:digit:]]{4}signarticle`' -e 'INSERT INTO `invoice[[:digit:]]{4}signtypearticle`' -e 'INSERT INTO `invoice[[:digit:]]{4}countryarticle`' -e 'INSERT INTO `invoice[[:digit:]]{4}countryclient`' -e 'INSERT INTO `invoice[[:digit:]]{4}clientarticle`' -e 'INSERT INTO `invoice[[:digit:]]{4}clientgroupingarticle`' -e 'INSERT INTO `deliveryordercollectionclient`' -e 'INSERT INTO `deliveryordergroupclient`' -e 'INSERT INTO `deliveryorderhouseclient`' -e 'INSERT INTO `deliveryordershelvingclient`' -e 'INSERT INTO `deliveryordercollection`' -e 'INSERT INTO `deliveryordersalepoint`' -e 'INSERT INTO `deliveryordersalepointarticle`' -e 'INSERT INTO `deliveryordercentralarticle`' -e 'INSERT INTO `deliveryordersignarticle`' -e 'INSERT INTO `deliveryordersigntypearticle`' -e 'INSERT INTO `deliveryordercountryarticle`' -e 'INSERT INTO `deliveryordercountryclient`' -e 'INSERT INTO `deliveryorderclientarticle`' -e 'INSERT INTO `deliveryorderclientgroupingarticle`' -e 'INSERT INTO `invoice[[:digit:]]clientcumulation`' -e 'INSERT INTO `invoice[[:digit:]]clientclassifcumulation`' "
+                    }
+                    if (deleteInfo==true) {
+                        sh(returnStdout: false, label: 'Nettoyage des données', script: "egrep -v -i " + deleteOrder + " ${SQL_SCRIPT} > tmptmp.tmp")
+                        sh(returnStdout: false, script: "cp -f tmptmp.tmp ${SQL_SCRIPT}")
+                    }
+                }
+            }
+        }
+        stage('Insertion des données en base') {
+            steps {
+                withCredentials([usernamePassword(credentialsId: 'jenkins-user-for-mysql', passwordVariable: 'DATABASE_PASSWORD', usernameVariable: 'DATABASE_USERNAME')]) {
+                    script {
+                        def targetDatabase
+                        
+                        if (databaseName=="master") {
+                            targetDatabase = "alize_master"
+                        } else if (databaseName=="development") {
+                            targetDatabase = "alize_development"
+                        } else if (databaseName=="feature") {
+                            targetDatabase = "alize_feature"
+                        }
+
+                        sh(returnStdout: false, script: '''
+                            mysql --user=${DATABASE_USERNAME} --password=${DATABASE_PASSWORD} <<-EOF
+                            DROP DATABASE IF EXISTS ''' + targetDatabase + ''';
+                            CREATE DATABASE IF NOT EXISTS ''' + targetDatabase + ''';
+                            USE ''' + targetDatabase + ''';
+                            source ${SQL_SCRIPT};
+                            DELETE FROM ftppartnership;
+                            UPDATE house SET divaltodirectory ='', divaltobackdirectory = '',  accountingfolder = '', accountingmail = '';
+                            exit
+EOF''')
+                    }
+                }
+            }
+        }
+        stage('Suppression des fichiers de travail') {
+            steps {
+                script {
+                    if (params.keepLocalDump==true) {
+                        echo 'Le fichier de dump importé sera conservé en local'
+                    } else {
+                        sh(returnStdout: false, label: 'Suppression du dump', script: 'rm -f ${WORKING_DUMP}')
+                    }
+                    sh(returnStdout: false, script: 'rm -f ${SQL_SCRIPT}')
+                    sh(returnStdout: false, script: 'rm -f tmptmp.tmp')
+                }
+            }
+        }
     }
-  }
-  post {
-    always {
-      println("Suppression de l'archive")
-      sh (script: "rm -f ${DUMP_ARCHIVE_PATH}", returnStdout: false)    
-      
-      println("Suppression du script")
-      sh (script: "rm -f ${DUMP_SRC_PATH}", returnStdout: false)
-      
-      println("Suppression du script de travail")
-      sh (script: "rm -f ${DUMP_WORK_PATH}", returnStdout: false)
-    }
-  }
 }
